@@ -1,0 +1,7 @@
+data/
+paper/
+results/
+Submission/
+*.pdf
+!Springer*.pdf
+*.pptx
