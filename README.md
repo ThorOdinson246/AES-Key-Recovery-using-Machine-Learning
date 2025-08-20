@@ -2,7 +2,7 @@
 
 This repository contains overview of implementations of machine learning models for extracting AES encryption keys through electromagnetic (EM) side-channel analysis, using the ASCAD (ANSSI SCA Database) datasets.
 
-Detailed overview and paper at : [Project Site](https://mukeshpoudel.com.np/aeskeyrecovery/) 
+Detailed overview and paper at : [arXiv](https://arxiv.org/abs/2508.11817)  and [Project Site](https://mukeshpoudel.com.np/aeskeyrecovery/)
 
 ## Overview
 
@@ -28,12 +28,12 @@ The project uses two ASCAD datasets created by ANSSI:
 
 ## Code Structure
 
-The repository contains three main Jupyter notebooks: The notebooks are detailed and should be easy to follow. Each notebook is designed to be run independently, and they are organized in a way that allows for a clear understanding of the workflow.
+The repository contains three main Scripts inside the script folder: The scripts are detailed and should be easy to follow. Each script is designed to be run independently, and optimized for hyperparameter study as well and they are organized in a way that allows for a clear understanding of the workflow.
 
-1. **CNNASCADf.ipynb**: CNN implementation for fixed-key dataset
-2. **CNNASCADv.ipynb**: CNN implementation for variable-key dataset(**In Progress**)
-3. **RF_SVCASCADf.ipynb**: Random Forest and SVM for fixed-key dataset  
-4. **RF_SVCASCADv.ipynb**: Random Forest and SVM for variable-key dataset
+1. **cnn_resnet_unified.py**: CNN and ResNet implementation for fixed-key and variable-key dataset
+2. **rd.py**: RF implementation for fixed-key and variable-key 
+3. **svc.py**: SVM for fixed-key and variable-key dataset  
+
 
 ### Core Functions
 
@@ -143,6 +143,67 @@ Key aspects of the CNN architecture:
 - Average pooling to reduce dimensions while preserving important features
 - Final dense layers with dropout to prevent overfitting
 
+
+#### ResNet Architecture
+
+<img src="images/fig3ResNet.png" width="800" alt="CNN Architecture">
+
+Our ResNet model is built from a series of Residual Blocks. Each block contains a main path with two convolutional layers, and a parallel 'shortcut connection'. This shortcut bypasses the layers and adds the block's original input back to the output of the convolutional path
+
+```python
+class ResidualBlock(nn.Module):
+    def __init__(self, in_ch, out_ch, ks):
+        super().__init__()
+        self.conv1 = nn.Conv1d(in_ch, out_ch, ks, padding=ks // 2)
+        self.bn1 = nn.BatchNorm1d(out_ch)
+        self.relu = nn.ReLU()
+        self.conv2 = nn.Conv1d(out_ch, out_ch, ks, padding=ks // 2)
+        self.bn2 = nn.BatchNorm1d(out_ch)
+        self.shortcut = (
+            nn.Conv1d(in_ch, out_ch, 1) if in_ch != out_ch else nn.Identity()
+        )
+
+    def forward(self, x):
+        res = self.shortcut(x)
+        out = self.relu(self.bn1(self.conv1(x)))
+        out = self.bn2(self.conv2(out))
+        out += res
+        return self.relu(out)
+
+
+class ResNet_SCA_CNN(nn.Module):
+    def __init__(self, input_length=700, num_blocks=4, kernel_size=11, filters=None):
+        super().__init__()
+        if filters is None:
+            filters = [64, 128, 256, 512]
+        layers = []
+        in_channels = 1
+        for i in range(num_blocks):
+            layers.extend(
+                [ResidualBlock(in_channels, filters[i], kernel_size), nn.AvgPool1d(2)]
+            )
+            in_channels = filters[i]
+        self.features = nn.Sequential(*layers)
+        dummy_out = self.features(torch.randn(1, 1, input_length))
+        self.classifier = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(dummy_out.numel(), 4096),
+            nn.ReLU(),
+            nn.Dropout(0.5),
+            nn.Linear(4096, 256),
+        )
+
+    def forward(self, x):
+        return self.classifier(self.features(x.unsqueeze(1)))
+
+
+```
+
+Key aspects of the ResNet architecture:
+- Each block contains a shortcut connection that adds the input of the block to its output.
+- These shortcuts act as "express lanes" for the gradient, mitigating the vanishing gradient problem and allowing the network to be trained to greater depths.
+- The improved stability enables the model to learn more complex and abstract features, which are essential for succeeding on noisy and variable-key datasets where the standard CNN failed.
+
 #### Random Forest with Feature Selection
 
 The RF implementation includes feature importance analysis to select the most informative time points:
@@ -194,24 +255,7 @@ svc_attack_probs = svc.predict_proba(X_attack_scaled[:, selected_features])
 
 ## Results
 
-Our experimental results show:
-
-
-| Model | Dataset | Features | Traces to Rank 0 |
-|-------|---------|----------|------------------|
-| CNN | ASCADf | 700 | ~65 |
-| Random Forest | ASCADf | 700 (all) | ~492 |
-| Random Forest | ASCADf | 100 (reduced) | ~200 |
-| SVM | ASCADf | 100 (reduced) | ~320 |
-| Random Forest | ASCADv | 1400 (all) | ~750 |
-| Random Forest | ASCADv | 100 (reduced) | ~470 |
-| SVM | ASCADv | 100 (reduced) | ~320 |
-
-Key findings:
-1. **Models successfully recover keys despite low classification accuracy** (<2%)
-2. **Feature selection** significantly improves RF performance (40-50% reduction in required traces)
-3. **CNN** achieves the most efficient key recovery on the fixed-key dataset
-4. **SVM** performs adequately when using reduced features but is very computationally expensive
+Our experimental are detailed in the paper itself
 
 ## The Accuracy Paradox in Side-Channel Analysis
 
@@ -240,4 +284,6 @@ This demonstrates why domain-specific evaluation metrics like Key Rank are essen
 5. Run the notebooks in sequence
 
 ## Notes
-While promising results are available, The project is still under active development and improvements are ongoing. 
+The code has been modified from the earlier notebooks to better support automated hyperparameter studies. 
+
+The code organization was (at times) assisted through the use of LLMs. 
